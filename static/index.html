@@ -1,0 +1,359 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Telemetría Solar</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+  :root {
+    color-scheme: light;
+    --surface-0: #f4f4f2;
+    --surface-1: #fcfcfb;
+    --borde: #e3e2de;
+    --grid: #ecebe7;
+    --text-primary: #0b0b0b;
+    --text-secondary: #52514e;
+    --text-muted: #7a7974;
+    --serie: #2a78d6;
+    --serie-relleno: rgba(42, 120, 214, 0.10);
+    --ok: #0f8a3c;
+    --mal: #c62f2f;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      color-scheme: dark;
+      --surface-0: #111110;
+      --surface-1: #1a1a19;
+      --borde: #2c2c2a;
+      --grid: #262624;
+      --text-primary: #f0efec;
+      --text-secondary: #c3c2b7;
+      --text-muted: #8f8e86;
+      --serie: #3987e5;
+      --serie-relleno: rgba(57, 135, 229, 0.16);
+      --ok: #3cbf6a;
+      --mal: #e66767;
+    }
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--surface-0);
+    color: var(--text-primary);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  .contenedor { max-width: 1200px; margin: 0 auto; padding: 24px 16px 48px; }
+
+  header {
+    display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
+    gap: 12px; margin-bottom: 20px;
+  }
+  h1 { font-size: 1.4rem; margin: 0; }
+  h2 { font-size: 1rem; margin: 0 0 4px; }
+  .sub { color: var(--text-secondary); font-size: .85rem; margin: 0; }
+
+  .estado {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 6px 12px; border-radius: 999px; font-size: .85rem;
+    background: var(--surface-1); border: 1px solid var(--borde);
+  }
+  .punto { width: 10px; height: 10px; border-radius: 50%; background: var(--text-muted); }
+  .estado.ok .punto { background: var(--ok); }
+  .estado.mal .punto { background: var(--mal); }
+
+  .tarjetas {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 12px; margin-bottom: 20px;
+  }
+  .tarjeta, .panel {
+    background: var(--surface-1); border: 1px solid var(--borde); border-radius: 12px;
+  }
+  .tarjeta { padding: 14px 16px; }
+  .tarjeta .etiqueta { color: var(--text-secondary); font-size: .85rem; }
+  .tarjeta .valor {
+    font-size: 2rem; font-weight: 650; font-variant-numeric: tabular-nums; margin-top: 4px;
+  }
+  .tarjeta .unidad { font-size: 1rem; font-weight: 500; color: var(--text-secondary); margin-left: 2px; }
+
+  .barra-filtros {
+    display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
+    gap: 12px; margin: 28px 0 12px;
+  }
+  .segmentado {
+    display: inline-flex; background: var(--surface-1); border: 1px solid var(--borde);
+    border-radius: 8px; padding: 3px;
+  }
+  .segmentado button {
+    border: 0; background: transparent; color: var(--text-secondary);
+    padding: 6px 12px; border-radius: 6px; font: inherit; font-size: .85rem; cursor: pointer;
+  }
+  .segmentado button.activo { background: var(--serie); color: #fff; }
+
+  .graficos { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 12px; }
+  .panel { padding: 16px; }
+  .lienzo { position: relative; height: 220px; margin-top: 12px; }
+  .lienzo.alto { height: 260px; }
+
+  table { width: 100%; border-collapse: collapse; font-size: .85rem; font-variant-numeric: tabular-nums; }
+  th, td { text-align: right; padding: 8px 10px; border-bottom: 1px solid var(--grid); }
+  th:first-child, td:first-child { text-align: left; }
+  th { color: var(--text-secondary); font-weight: 600; }
+  .tabla-scroll { overflow-x: auto; margin-top: 12px; }
+  .vacio { color: var(--text-muted); font-size: .9rem; padding: 24px 0; text-align: center; }
+
+  @media (max-width: 420px) {
+    .graficos { grid-template-columns: 1fr; }
+    .tarjeta .valor { font-size: 1.6rem; }
+  }
+</style>
+</head>
+<body>
+<div class="contenedor">
+
+  <header>
+    <div>
+      <h1>☀️ Telemetría Solar</h1>
+      <p class="sub">Panel solar · ESP32 + INA219</p>
+    </div>
+    <div class="estado" id="estado"><span class="punto"></span><span id="estado-texto">Conectando…</span></div>
+  </header>
+
+  <!-- Valores instantáneos -->
+  <section class="tarjetas">
+    <div class="tarjeta"><div class="etiqueta">Voltaje</div><div class="valor"><span id="v">–</span><span class="unidad">V</span></div></div>
+    <div class="tarjeta"><div class="etiqueta">Corriente</div><div class="valor"><span id="i">–</span><span class="unidad">A</span></div></div>
+    <div class="tarjeta"><div class="etiqueta">Potencia</div><div class="valor"><span id="p">–</span><span class="unidad">W</span></div></div>
+    <div class="tarjeta"><div class="etiqueta">Energía generada hoy</div><div class="valor"><span id="e">–</span><span class="unidad">Wh</span></div></div>
+  </section>
+
+  <!-- Tiempo real -->
+  <div class="barra-filtros">
+    <div>
+      <h2>Tiempo real</h2>
+      <p class="sub">Lecturas cada 500 ms (se guarda la última hora)</p>
+    </div>
+    <div class="segmentado" id="rango">
+      <button data-min="5" class="activo">5 min</button>
+      <button data-min="15">15 min</button>
+      <button data-min="60">1 hora</button>
+    </div>
+  </div>
+  <section class="graficos">
+    <div class="panel"><h2>Potencia (W)</h2><div class="lienzo"><canvas id="g-p"></canvas></div></div>
+    <div class="panel"><h2>Voltaje (V)</h2><div class="lienzo"><canvas id="g-v"></canvas></div></div>
+    <div class="panel"><h2>Corriente (A)</h2><div class="lienzo"><canvas id="g-i"></canvas></div></div>
+  </section>
+
+  <!-- Historial por hora -->
+  <div class="barra-filtros">
+    <div>
+      <h2>Historial por hora</h2>
+      <p class="sub">Energía generada en cada hora y promedios</p>
+    </div>
+    <div class="segmentado" id="rango-horas">
+      <button data-h="24" class="activo">24 h</button>
+      <button data-h="72">3 días</button>
+      <button data-h="168">7 días</button>
+    </div>
+  </div>
+  <section class="panel">
+    <h2>Energía por hora (Wh)</h2>
+    <div class="lienzo alto"><canvas id="g-energia"></canvas></div>
+    <div class="tabla-scroll">
+      <table>
+        <thead>
+          <tr><th>Hora</th><th>Energía (Wh)</th><th>P prom (W)</th><th>P máx (W)</th><th>V prom (V)</th><th>I prom (A)</th></tr>
+        </thead>
+        <tbody id="tabla-resumen"></tbody>
+      </table>
+    </div>
+  </section>
+
+</div>
+
+<script>
+// ---------------------------------------------------------------- configuración
+const REFRESCO_ACTUAL_MS = 1000;
+const REFRESCO_GRAFICOS_MS = 3000;
+const REFRESCO_RESUMEN_MS = 60000;
+
+let minutosRango = 5;
+let horasResumen = 24;
+
+const css = (nombre) => getComputedStyle(document.documentElement).getPropertyValue(nombre).trim();
+const horaCorta = (iso) => new Date(iso).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+const horaDia = (iso) => {
+  const d = new Date(iso);
+  return d.toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit' }) + ' ' +
+         d.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', hour12: false });
+};
+
+// ---------------------------------------------------------------- gráficos
+function opcionesBase(unidad, decimales) {
+  return {
+    responsive: true,
+    maintainAspectRatio: false,
+    animation: false,
+    interaction: { mode: 'index', intersect: false },
+    plugins: {
+      legend: { display: false },
+      tooltip: {
+        displayColors: false,
+        callbacks: { label: (c) => `${c.parsed.y.toFixed(decimales)} ${unidad}` },
+      },
+    },
+    scales: {
+      x: {
+        grid: { display: false },
+        ticks: { color: css('--text-muted'), maxTicksLimit: 6, maxRotation: 0 },
+        border: { color: css('--borde') },
+      },
+      y: {
+        grid: { color: css('--grid') },
+        ticks: { color: css('--text-muted'), maxTicksLimit: 5 },
+        border: { display: false },
+      },
+    },
+  };
+}
+
+function crearLinea(id, unidad, decimales) {
+  return new Chart(document.getElementById(id), {
+    type: 'line',
+    data: { labels: [], datasets: [{
+      data: [],
+      borderColor: css('--serie'),
+      backgroundColor: css('--serie-relleno'),
+      borderWidth: 2,
+      fill: true,
+      pointRadius: 0,
+      pointHoverRadius: 5,
+      pointHoverBackgroundColor: css('--serie'),
+      pointHoverBorderColor: css('--surface-1'),
+      pointHoverBorderWidth: 2,
+      tension: 0.2,
+    }] },
+    options: opcionesBase(unidad, decimales),
+  });
+}
+
+const gP = crearLinea('g-p', 'W', 2);
+const gV = crearLinea('g-v', 'V', 2);
+const gI = crearLinea('g-i', 'A', 3);
+
+const gEnergia = new Chart(document.getElementById('g-energia'), {
+  type: 'line',
+  data: { labels: [], datasets: [{
+    data: [],
+    borderColor: css('--serie'),
+    backgroundColor: css('--serie'),
+    borderWidth: 2,
+    fill: false,
+    tension: 0.3,
+    pointStyle: 'rect',          // marcadores cuadrados, como en la referencia
+    pointRadius: 4,
+    pointHoverRadius: 6,
+    pointBorderColor: css('--surface-1'),
+    pointBorderWidth: 1,
+  }] },
+  options: (() => {
+    const o = opcionesBase('Wh', 2);
+    o.scales.y.beginAtZero = true;
+    o.scales.x.ticks.maxTicksLimit = 8;
+    return o;
+  })(),
+});
+
+// ---------------------------------------------------------------- datos
+async function pedir(url) {
+  const r = await fetch(url, { cache: 'no-store' });
+  if (!r.ok) throw new Error(r.status);
+  return r.json();
+}
+
+function ponerEstado(clase, texto) {
+  const el = document.getElementById('estado');
+  el.className = 'estado ' + clase;
+  document.getElementById('estado-texto').textContent = texto;
+}
+
+async function actualizarActual() {
+  try {
+    const d = await pedir('/api/actual');
+    if (d.lectura) {
+      document.getElementById('v').textContent = d.lectura.voltaje.toFixed(2);
+      document.getElementById('i').textContent = d.lectura.corriente.toFixed(3);
+      document.getElementById('p').textContent = d.lectura.potencia.toFixed(2);
+    }
+    document.getElementById('e').textContent = d.energia_hoy_wh.toFixed(2);
+
+    if (d.en_linea) ponerEstado('ok', 'ESP32 en línea');
+    else if (d.lectura) ponerEstado('mal', `ESP32 sin datos hace ${Math.round(d.segundos_desde_ultima)} s`);
+    else ponerEstado('mal', 'Esperando datos del ESP32');
+  } catch {
+    ponerEstado('mal', 'Sin conexión con el servidor');
+  }
+}
+
+async function actualizarGraficos() {
+  try {
+    const filas = await pedir(`/api/historico?minutos=${minutosRango}&max_puntos=400`);
+    const etiquetas = filas.map((f) => horaCorta(f.timestamp));
+    for (const [g, campo] of [[gP, 'potencia'], [gV, 'voltaje'], [gI, 'corriente']]) {
+      g.data.labels = etiquetas;
+      g.data.datasets[0].data = filas.map((f) => f[campo]);
+      g.update('none');
+    }
+  } catch { /* el estado ya lo muestra actualizarActual */ }
+}
+
+async function actualizarResumen() {
+  try {
+    const filas = await pedir(`/api/resumen?horas=${horasResumen}`);
+    gEnergia.data.labels = filas.map((f) => horaDia(f.hora_inicio));
+    gEnergia.data.datasets[0].data = filas.map((f) => f.energia_wh);
+    // Con muchas horas (3 o 7 días) los marcadores se achican para no amontonarse
+    gEnergia.data.datasets[0].pointRadius = filas.length > 48 ? 2 : 4;
+    gEnergia.update('none');
+
+    const tbody = document.getElementById('tabla-resumen');
+    if (!filas.length) {
+      tbody.innerHTML = '<tr><td colspan="6" class="vacio">Todavía no hay horas completas. El primer resumen aparece cuando termina la primera hora con datos.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = filas.slice().reverse().map((f) => `
+      <tr>
+        <td>${horaDia(f.hora_inicio)}</td>
+        <td>${f.energia_wh.toFixed(2)}</td>
+        <td>${f.p_prom.toFixed(2)}</td>
+        <td>${f.p_max.toFixed(2)}</td>
+        <td>${f.v_prom.toFixed(2)}</td>
+        <td>${f.i_prom.toFixed(3)}</td>
+      </tr>`).join('');
+  } catch { }
+}
+
+// ---------------------------------------------------------------- controles
+function segmentado(id, alElegir) {
+  document.getElementById(id).addEventListener('click', (ev) => {
+    const b = ev.target.closest('button');
+    if (!b) return;
+    document.querySelectorAll(`#${id} button`).forEach((x) => x.classList.toggle('activo', x === b));
+    alElegir(b);
+  });
+}
+segmentado('rango', (b) => { minutosRango = +b.dataset.min; actualizarGraficos(); });
+segmentado('rango-horas', (b) => { horasResumen = +b.dataset.h; actualizarResumen(); });
+
+// ---------------------------------------------------------------- arranque
+actualizarActual();
+actualizarGraficos();
+actualizarResumen();
+setInterval(actualizarActual, REFRESCO_ACTUAL_MS);
+setInterval(actualizarGraficos, REFRESCO_GRAFICOS_MS);
+setInterval(actualizarResumen, REFRESCO_RESUMEN_MS);
+</script>
+</body>
+</html>

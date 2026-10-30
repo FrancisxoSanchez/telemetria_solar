@@ -1,0 +1,18 @@
+# Base de datos local: cada uno tiene la suya, no se sube
+telemetria.db
+telemetria.db-wal
+telemetria.db-shm
+
+# Archivos que genera Python
+__pycache__/
+*.pyc
+venv/
+.venv/
+
+# Archivos del sistema
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Credenciales del Wi‑Fi del ESP32 (para cuando lleguemos a esa parte)
+esp32/**/secrets.h
